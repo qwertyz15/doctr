@@ -57,12 +57,22 @@ class _OCRPredictor:
         channels_last: bool,
         assume_straight_pages: bool = False,
     ) -> List[List[np.ndarray]]:
-        extraction_fn = extract_crops if assume_straight_pages else extract_rcrops
+        if assume_straight_pages:
+            print("extract_crops")
+        else:
+            print("extract_rcrops")
 
-        crops = [
-            extraction_fn(page, _boxes[:, :4], channels_last=channels_last)  # type: ignore[operator]
-            for page, _boxes in zip(pages, loc_preds)
-        ]
+        extraction_fn = extract_crops if assume_straight_pages else extract_rcrops
+        print(extraction_fn)
+
+        # crops = [
+        #     extraction_fn(page, _boxes[:, :4], channels_last=channels_last)  # type: ignore[operator]
+        #     for page, _boxes in zip(pages, loc_preds)
+        # ]
+        crops = []
+        for page, _boxes in zip(pages, loc_preds):
+            crop = extraction_fn(page, _boxes[:, :4], channels_last=channels_last)  # type: ignore[operator]
+            crops.append(crop)
         return crops
 
     @staticmethod
@@ -81,6 +91,7 @@ class _OCRPredictor:
             for page_crops, page_kept in zip(crops, is_kept)
         ]
         loc_preds = [_boxes[_kept] for _boxes, _kept in zip(loc_preds, is_kept)]
+        print(loc_preds)
 
         return crops, loc_preds
 
@@ -103,6 +114,44 @@ class _OCRPredictor:
             for orientation, prob in zip(page_classes, page_probs)
         ]
         return rect_crops, rect_loc_preds, crop_orientations  # type: ignore[return-value]
+
+    def _remove_padding(
+        self,
+        pages: List[np.ndarray],
+        loc_preds: List[np.ndarray],
+    ) -> List[np.ndarray]:
+        if self.preserve_aspect_ratio:
+            # Rectify loc_preds to remove padding
+            rectified_preds = []
+            for page, loc_pred in zip(pages, loc_preds):
+                h, w = page.shape[0], page.shape[1]
+                if h > w:
+                    # y unchanged, dilate x coord
+                    if self.symmetric_pad:
+                        if self.assume_straight_pages:
+                            loc_pred[:, [0, 2]] = np.clip((loc_pred[:, [0, 2]] - 0.5) * h / w + 0.5, 0, 1)
+                        else:
+                            loc_pred[:, :, 0] = np.clip((loc_pred[:, :, 0] - 0.5) * h / w + 0.5, 0, 1)
+                    else:
+                        if self.assume_straight_pages:
+                            loc_pred[:, [0, 2]] *= h / w
+                        else:
+                            loc_pred[:, :, 0] *= h / w
+                elif w > h:
+                    # x unchanged, dilate y coord
+                    if self.symmetric_pad:
+                        if self.assume_straight_pages:
+                            loc_pred[:, [1, 3]] = np.clip((loc_pred[:, [1, 3]] - 0.5) * w / h + 0.5, 0, 1)
+                        else:
+                            loc_pred[:, :, 1] = np.clip((loc_pred[:, :, 1] - 0.5) * w / h + 0.5, 0, 1)
+                    else:
+                        if self.assume_straight_pages:
+                            loc_pred[:, [1, 3]] *= w / h
+                        else:
+                            loc_pred[:, :, 1] *= w / h
+                rectified_preds.append(loc_pred)
+            return rectified_preds
+        return loc_preds
 
     @staticmethod
     def _process_predictions(
