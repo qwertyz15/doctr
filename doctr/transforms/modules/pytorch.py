@@ -47,8 +47,8 @@ class Resize(T.Resize):
         actual_ratio = img.shape[-2] / img.shape[-1]
 
         if not self.preserve_aspect_ratio or (target_ratio == actual_ratio and (isinstance(self.size, (tuple, list)))):
-            # If we don't preserve the aspect ratio or the wanted aspect ratio is the same than the original one
-            # We can use with the regular resize
+            # If we don't preserve the aspect ratio or the wanted aspect ratio is the same as the original one
+            # We can use the regular resize
             if target is not None:
                 return super().forward(img), target
             return super().forward(img)
@@ -83,7 +83,9 @@ class Resize(T.Resize):
                     if target.shape[1:] == (4,):
                         if isinstance(self.size, (tuple, list)) and self.symmetric_pad:
                             if np.max(target) <= 1:
-                                offset = half_pad[0] / img.shape[-1], half_pad[1] / img.shape[-2]
+                                offset = (half_pad[0] / img.shape[-1], half_pad[1] / img.shape[-2])
+                            else:
+                                offset = (0, 0)
                             target[:, [0, 2]] = offset[0] + target[:, [0, 2]] * raw_shape[-1] / img.shape[-1]
                             target[:, [1, 3]] = offset[1] + target[:, [1, 3]] * raw_shape[-2] / img.shape[-2]
                         else:
@@ -92,7 +94,9 @@ class Resize(T.Resize):
                     elif target.shape[1:] == (4, 2):
                         if isinstance(self.size, (tuple, list)) and self.symmetric_pad:
                             if np.max(target) <= 1:
-                                offset = half_pad[0] / img.shape[-1], half_pad[1] / img.shape[-2]
+                                offset = (half_pad[0] / img.shape[-1], half_pad[1] / img.shape[-2])
+                            else:
+                                offset = (0, 0)
                             target[..., 0] = offset[0] + target[..., 0] * raw_shape[-1] / img.shape[-1]
                             target[..., 1] = offset[1] + target[..., 1] * raw_shape[-2] / img.shape[-2]
                         else:
