@@ -27,6 +27,9 @@ from doctr.models import detection, login_to_hub, push_to_hf_hub
 from doctr.utils.metrics import LocalizationConfusion
 from utils import EarlyStopper, plot_recorder, plot_samples
 
+from torchvision import transforms
+from PIL import Image
+
 
 def record_lr(
     model: torch.nn.Module,
@@ -107,30 +110,152 @@ def fit_one_epoch(model, train_loader, batch_transforms, optimizer, scheduler, a
     # Iterate over the batches of the dataset
     pbar = tqdm(train_loader, position=1)
     for images, targets in pbar:
-        if torch.cuda.is_available():
-            images = images.cuda()
-        images = batch_transforms(images)
+        valid_images = []
+        valid_targets = []
+        
+        for img, tgt in zip(images, targets):
+            try:
+                # Apply batch transformations
+                img = batch_transforms(img)
+                valid_images.append(img)
+                valid_targets.append(tgt)
+            except Exception as e:
+                print(f"Skipping an image due to an error: {e}")
+                continue
+        
+        if not valid_images:
+            continue
 
-        optimizer.zero_grad()
-        if amp:
-            with torch.cuda.amp.autocast():
+        images = torch.stack(valid_images)
+        targets = valid_targets
+        
+        try:
+            if torch.cuda.is_available():
+                images = images.cuda()
+
+            optimizer.zero_grad()
+            if amp:
+                with torch.cuda.amp.autocast():
+                    train_loss = model(images, targets)["loss"]
+                scaler.scale(train_loss).backward()
+                # Gradient clipping
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 5)
+                # Update the params
+                scaler.step(optimizer)
+                scaler.update()
+            else:
                 train_loss = model(images, targets)["loss"]
-            scaler.scale(train_loss).backward()
-            # Gradient clipping
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 5)
-            # Update the params
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            train_loss = model(images, targets)["loss"]
-            train_loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 5)
-            optimizer.step()
+                train_loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 5)
+                optimizer.step()
 
-        scheduler.step()
+            scheduler.step()
 
-        pbar.set_description(f"Training loss: {train_loss.item():.6}")
+            pbar.set_description(f"Training loss: {train_loss.item():.6}")
+        except Exception as e:
+            print(images.shape) 
+            tensor_images = images
+            import time
+            # Define the directory to save the images
+            save_directory = "/home/dev/Documents/doctr/save_corrupted_image"
+
+            # Create the directory if it doesn't exist
+            if not os.path.exists(save_directory):
+                os.makedirs(save_directory)
+
+            # Define a transformation to convert the tensor to a PIL image
+            transform = transforms.ToPILImage()
+
+            # Save each tensor image to the directory
+            for i, tensor_image in enumerate(tensor_images):
+                # Move the tensor to CPU and detach it from the computation graph
+                tensor_image = tensor_image.cpu().detach()
+
+                # Normalize the tensor to the range [0, 1]
+                tensor_image = (tensor_image - tensor_image.min()) / (tensor_image.max() - tensor_image.min())
+
+                # Convert the tensor to a PIL image
+                pil_image = transform(tensor_image)
+
+                # Define the file name and save the image
+                file_name = os.path.join(save_directory, f"image_{time.time()}.png")
+                pil_image.save(file_name)
+
+            print(f"Saved {len(tensor_images)} images to {save_directory}")       
+            print(f"Skipping a batch due to an error: {e}")
+            continue
+
+# def fit_one_epoch(model, train_loader, batch_transforms, optimizer, scheduler, amp=False, dataset_path=""):
+#     if amp:
+#         scaler = torch.cuda.amp.GradScaler()
+
+#     model.train()
+#     # Iterate over the batches of the dataset
+#     pbar = tqdm(train_loader, position=1)
+#     problematic_images = set()  # Store names of problematic images
+#     batch_size = train_loader.batch_size
+
+#     for batch_idx, (images, targets) in enumerate(pbar):
+#         valid_images = []
+#         valid_targets = []
+
+#         for img_idx, (img, tgt) in enumerate(zip(images, targets)):
+#             try:
+#                 # Apply batch transformations
+#                 img = batch_transforms(img)
+#                 valid_images.append(img)
+#                 valid_targets.append(tgt)
+#             except Exception as e:
+#                 img_name = f"Image from batch {batch_idx * batch_size + img_idx}"
+#                 problematic_images.add(img_name)
+#                 print(f"Skipping an image due to an error: {e} ({img_name})")
+#                 continue
+
+#         if not valid_images:
+#             continue
+
+#         images = torch.stack(valid_images)
+#         targets = valid_targets
+
+#         try:
+#             if torch.cuda.is_available():
+#                 images = images.cuda()
+
+#             optimizer.zero_grad()
+#             if amp:
+#                 with torch.cuda.amp.autocast():
+#                     train_loss = model(images, targets)["loss"]
+#                 scaler.scale(train_loss).backward()
+#                 # Gradient clipping
+#                 scaler.unscale_(optimizer)
+#                 torch.nn.utils.clip_grad_norm_(model.parameters(), 5)
+#                 # Update the params
+#                 scaler.step(optimizer)
+#                 scaler.update()
+#             else:
+#                 train_loss = model(images, targets)["loss"]
+#                 train_loss.backward()
+#                 torch.nn.utils.clip_grad_norm_(model.parameters(), 5)
+#                 optimizer.step()
+
+#             scheduler.step()
+
+#             pbar.set_description(f"Training loss: {train_loss.item():.6}")
+#         except Exception as e:
+#             print(f"Skipping a batch due to an error: {e}")
+#             continue
+
+#     # Print the problematic images at the end of the epoch
+#     if problematic_images:
+#         print(f"Problematic images: {len(problematic_images)}")
+#         for img in problematic_images:
+#             print(img)
+#     else:
+#         print("No problematic images found.")
+
+
+
 
 
 @torch.no_grad()
@@ -261,12 +386,12 @@ def main(args):
     img_transforms = T.OneOf([
         Compose([
             T.RandomApply(T.ColorInversion(), 0.3),
-            T.RandomApply(GaussianBlur(kernel_size=5, sigma=(0.1, 4)), 0.2),
+            T.RandomApply(GaussianBlur(kernel_size=5, sigma=[0.1, 4.0]), 0.2),
         ]),
         Compose([
             T.RandomApply(T.RandomShadow(), 0.3),
             T.RandomApply(T.GaussianNoise(), 0.1),
-            T.RandomApply(GaussianBlur(kernel_size=5, sigma=(0.1, 4)), 0.3),
+            T.RandomApply(GaussianBlur(kernel_size=5, sigma=[0.1, 4.0]), 0.3),
             RandomGrayscale(p=0.15),
         ]),
         RandomPhotometricDistort(p=0.3),
