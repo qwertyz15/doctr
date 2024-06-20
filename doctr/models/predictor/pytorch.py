@@ -13,7 +13,11 @@ from doctr.io.elements import Document
 from doctr.models._utils import estimate_orientation, get_language
 from doctr.models.detection.predictor import DetectionPredictor
 from doctr.models.recognition.predictor import RecognitionPredictor
-from doctr.utils.geometry import detach_scores, rotate_image
+from doctr.utils.geometry import rotate_image
+import os
+from PIL import Image
+
+from .base import _OCRPredictor
 
 from .base import _OCRPredictor
 
@@ -60,6 +64,16 @@ class OCRPredictor(nn.Module, _OCRPredictor):
         self.detect_orientation = detect_orientation
         self.detect_language = detect_language
 
+    def save_images(self, image_list: List[np.ndarray], output_dir: str, base_filename: str = 'image') -> None:
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        for idx, img_array in enumerate(image_list):
+            img = Image.fromarray(img_array)
+            img_path = os.path.join(output_dir, f"{base_filename}_{idx + 1}.png")
+            img.save(img_path)
+            print(f"Saved image {idx + 1} at {img_path}")
+
     @torch.inference_mode()
     def forward(
         self,
@@ -74,6 +88,7 @@ class OCRPredictor(nn.Module, _OCRPredictor):
 
         # Localize text elements
         loc_preds, out_maps = self.det_predictor(pages, return_maps=True, **kwargs)
+        print(loc_preds)
 
         # Detect document rotation and rotate pages
         seg_maps = [
@@ -102,15 +117,17 @@ class OCRPredictor(nn.Module, _OCRPredictor):
         ), "Detection Model in ocr_predictor should output only one class"
 
         loc_preds = [list(loc_pred.values())[0] for loc_pred in loc_preds]
-        # Detach objectness scores from loc_preds
-        loc_preds, objectness_scores = detach_scores(loc_preds)
         # Check whether crop mode should be switched to channels first
         channels_last = len(pages) == 0 or isinstance(pages[0], np.ndarray)
+
+        # Rectify crops if aspect ratio
+        loc_preds = self._remove_padding(pages, loc_preds)  # type: ignore[arg-type]
 
         # Apply hooks to loc_preds if any
         for hook in self.hooks:
             loc_preds = hook(loc_preds)
 
+        print(loc_preds)
         # Crop images
         crops, loc_preds = self._prepare_crops(
             pages,  # type: ignore[arg-type]
@@ -126,12 +143,18 @@ class OCRPredictor(nn.Module, _OCRPredictor):
                 {"value": orientation[0], "confidence": orientation[1]} for orientation in _crop_orientations
             ]
 
+        cro = [crop for page_crops in crops for crop in page_crops]
+        self.save_images(cro, '/home/dev/Documents/doctr/output_cropped')
+
+        #print(cro)
+        #print(f"Len of CRO: {len(cro)}")
         # Identify character sequences
         word_preds = self.reco_predictor([crop for page_crops in crops for crop in page_crops], **kwargs)
         if not crop_orientations:
             crop_orientations = [{"value": 0, "confidence": None} for _ in word_preds]
 
         boxes, text_preds, crop_orientations = self._process_predictions(loc_preds, word_preds, crop_orientations)
+        print(boxes)
 
         if self.detect_language:
             languages = [get_language(" ".join([item[0] for item in text_pred])) for text_pred in text_preds]
@@ -142,11 +165,11 @@ class OCRPredictor(nn.Module, _OCRPredictor):
         out = self.doc_builder(
             pages,  # type: ignore[arg-type]
             boxes,
-            objectness_scores,
             text_preds,
             origin_page_shapes,  # type: ignore[arg-type]
             crop_orientations,
             orientations,
             languages_dict,
         )
+        
         return out
