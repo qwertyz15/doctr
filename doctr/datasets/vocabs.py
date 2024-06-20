@@ -22,6 +22,7 @@ VOCABS: Dict[str, str] = {
     "arabic_punctuation": "؟؛«»—",
 }
 
+VOCABS["bengali"] = "অইউএওকখগঘঙচছজঝঞটঠডঢণতথদধনপফবভমযরলশষসহ়ািীুেোৌ্য়০১২৩৪৫৬৭৮৯- "
 VOCABS["latin"] = VOCABS["digits"] + VOCABS["ascii_letters"] + VOCABS["punctuation"]
 VOCABS["english"] = VOCABS["latin"] + "°" + VOCABS["currency"]
 VOCABS["legacy_french"] = VOCABS["latin"] + "°" + "àâéèêëîïôùûçÀÂÉÈËÎÏÔÙÛÇ" + VOCABS["currency"]
