@@ -25,6 +25,12 @@ or PyTorch:
 python references/recognition/train_pytorch.py crnn_vgg16_bn --train_path path/to/your/train_set --val_path path/to/your/val_set --epochs 5 --device 0
 ```
 
+or Bengali Vocab Pytorch:
+
+```shell
+python references/recognition/train_pytorch.py crnn_vgg16_bn --train_path path/to/your/train_set --val_path path/to/your/val_set --epochs 500 --device 0 --vocab 'ঁংঅইউএওকখগঘঙচছজঝঞটঠডঢণতথদধনপফবভমযরলশষসহ়ািীুেোৌ্য়০১২৩৪৫৬৭৮৯- '
+```
+
 ### Multi-GPU support (PyTorch only - Experimental)
 
 Multi-GPU support on recognition task with PyTorch has been added. It'll be probably added for other tasks.
